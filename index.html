@@ -919,16 +919,17 @@
       const sb = window.supabase.createClient(SB_URL, SB_KEY);
       const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
       const FAIL = "Não consegui salvar. Confira sua internet e tente de novo.";
+      const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 
       // ---------- banco de dados ----------
       const rowToGoal = r => ({ id: r.id, name: r.name, emoji: r.emoji, color: r.color, target: Number(r.target), deadline: r.deadline, createdAt: r.created_at, entries: [] });
       const rowToEntry = r => ({ id: r.id, amount: Number(r.amount), type: r.type, date: r.date, source: r.source, note: r.note || "", ts: Date.parse(r.created_at) || 0 });
 
       async function loadAll() {
-        const [g, e] = await Promise.all([
+        const [g, e] = await withTimeout(Promise.all([
           sb.from("goals").select("*").order("created_at"),
           sb.from("entries").select("*").order("created_at")
-        ]);
+        ]), 20000);
         if (g.error || e.error) throw (g.error || e.error);
         const goals = g.data.map(rowToGoal);
         const byId = Object.fromEntries(goals.map(x => [x.id, x]));
@@ -985,7 +986,10 @@
           render();
           await offerLocalImport();
         } catch (e) {
-          $("#main").innerHTML = '<p class="loading">Não consegui carregar suas metas. Confira sua internet e recarregue a página.</p>';
+          console.warn("[Cofrinho] carregar metas:", e);
+          const msg = String((e && (e.message || e.code)) || e);
+          const hint = /does not exist|relation|schema cache|PGRST205/i.test(msg) ? "As tabelas não foram encontradas. Rode o script SQL no seu Supabase." : "Confira sua internet e recarregue a página.";
+          $("#main").innerHTML = '<p class="loading">Não consegui carregar suas metas. ' + hint + '<br><small>' + esc(msg) + '</small></p>';
         }
       }
       async function offerLocalImport() {
@@ -1027,9 +1031,21 @@
           return;
         }
         btn.disabled = true; btn.textContent = "Entrando…";
-        const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+        try {
+          const { data, error } = await withTimeout(sb.auth.signInWithPassword({ email, password: pass }), 20000);
+          if (error) {
+            console.warn("[Cofrinho] login:", error);
+            err.textContent = /confirm/i.test(error.message) ? "Seu e-mail ainda não foi confirmado."
+              : /invalid/i.test(error.message) ? "E-mail ou senha incorretos."
+                : "Não consegui entrar: " + error.message;
+          } else {
+            enterApp(data.session);
+          }
+        } catch (e) {
+          console.warn("[Cofrinho] login:", e);
+          err.textContent = e.message === "timeout" ? "O servidor demorou para responder. Seu projeto do Supabase pode estar pausado." : "Falha de conexão com o servidor.";
+        }
         btn.disabled = false; btn.textContent = "Entrar";
-        if (error) err.textContent = /confirm/i.test(error.message) ? "Confirme seu e-mail antes de entrar." : "E-mail ou senha incorretos.";
       };
       $("#forgotBtn").onclick = async () => {
         const email = $("#aEmail").value.trim();
@@ -1301,16 +1317,28 @@
       document.addEventListener("click", e => { const b = e.target.closest("#goalDlg [data-close]"); if (b) $("#goalDlg").close(); });
       ["goalDlg", "detailDlg"].forEach(id => $("#" + id).addEventListener("click", e => { if (e.target.id === id) e.target.close(); }));
 
+      function enterApp(session) {
+        if (!session) return;
+        if (session.user.id === currentUser) return;
+        currentUser = session.user.id;
+        showApp(session);
+      }
+      // Regra do Supabase: nada de chamadas ao banco direto dentro deste aviso, senão trava.
       sb.auth.onAuthStateChange((event, session) => {
-        if (event === "PASSWORD_RECOVERY") return showAuth("recovery");
-        if (recovering) return;
-        if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
-          if (!session) { currentUser = null; return showAuth(); }
-          if (session.user.id === currentUser) return;
-          currentUser = session.user.id; showApp(session);
-        }
-        if (event === "SIGNED_OUT") { currentUser = null; showAuth(); }
+        setTimeout(() => {
+          if (event === "PASSWORD_RECOVERY") return showAuth("recovery");
+          if (recovering) return;
+          if (event === "SIGNED_IN") enterApp(session);
+          if (event === "SIGNED_OUT") { currentUser = null; showAuth(); }
+        }, 0);
       });
+      (async () => {
+        try {
+          const { data } = await withTimeout(sb.auth.getSession(), 15000);
+          if (recovering) return;
+          if (data.session) enterApp(data.session); else showAuth();
+        } catch (e) { showAuth(); $("#authErr").textContent = "O servidor não respondeu. Confira sua internet e recarregue a página."; }
+      })();
     })();
   </script>
 </body>
