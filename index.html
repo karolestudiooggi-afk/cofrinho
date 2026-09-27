@@ -836,8 +836,9 @@
           autocomplete="current-password" minlength="6" required></div>
       <p class="err" id="authErr"></p>
       <button type="submit" class="btn" id="authBtn">Entrar</button>
-      <div class="auth-links"><button type="button" class="linkish blue" id="forgotBtn">Esqueci minha senha</button>
-      </div>
+      <div class="auth-links" style="gap:18px;flex-wrap:wrap"><button type="button" class="linkish blue"
+          id="forgotBtn">Esqueci minha senha</button><button type="button" class="linkish blue" id="switchBtn">Criar
+          conta</button></div>
     </form>
   </section>
   <div class="wrap" id="appView" hidden>
@@ -912,9 +913,10 @@
 
       let state = { goals: [] };
       const LS = "cofrinho-v1";
-      const SB_URL = "https://vgxzybcobxixqshthrwa.supabase.co";
-      const SB_KEY = "sb_publishable_D-EimSoUEVyrTyqAKTbbIQ_rZBSId-W";
-      const sb = window.supabase.createClient(SB_URL, SB_KEY, { db: { schema: "cofrinho" } });
+      // Chave pública (anon): feita para ficar no site. A proteção dos dados é feita pelas regras RLS do banco.
+      const SB_URL = "https://bcmlkmbihdkyxrjlleqg.supabase.co";
+      const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJjbWxrbWJpaGRreXhyamxsZXFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NDg5MjIsImV4cCI6MjA3NTAyNDkyMn0.FyTd9dOdXdc4wKmmnG7Tl73UxzaKmhrPLwJCLz7v5Is";
+      const sb = window.supabase.createClient(SB_URL, SB_KEY);
       const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
       const FAIL = "Não consegui salvar. Confira sua internet e tente de novo.";
 
@@ -957,19 +959,23 @@
       }
 
       // ---------- login ----------
-      let recovering = false, currentUser = null;
+      let recovering = false, signingUp = false, currentUser = null;
       function showAuth(mode) {
         $("#appView").hidden = true; $("#authView").hidden = false;
         recovering = mode === "recovery";
-        $("#authTitle").textContent = recovering ? "Nova senha" : "Meu cofrinho";
-        $("#authLead").textContent = recovering ? "Escolha uma senha nova para entrar." : "Entre para ver suas metas.";
+        signingUp = mode === "signup";
+        $("#authTitle").textContent = recovering ? "Nova senha" : signingUp ? "Criar conta" : "Meu cofrinho";
+        $("#authLead").textContent = recovering ? "Escolha uma senha nova para entrar." : signingUp ? "Crie seu acesso para guardar suas metas na nuvem." : "Entre para ver suas metas.";
         $("#emailField").hidden = recovering;
-        $("#aPassLbl").textContent = recovering ? "Nova senha (mínimo 6 caracteres)" : "Senha";
-        $("#aPass").autocomplete = recovering ? "new-password" : "current-password";
-        $("#authBtn").textContent = recovering ? "Salvar nova senha" : "Entrar";
-        $("#forgotBtn").hidden = recovering;
+        $("#aPassLbl").textContent = (recovering || signingUp) ? "Senha (mínimo 6 caracteres)" : "Senha";
+        $("#aPass").autocomplete = (recovering || signingUp) ? "new-password" : "current-password";
+        $("#authBtn").textContent = recovering ? "Salvar nova senha" : signingUp ? "Criar conta" : "Entrar";
+        $("#forgotBtn").hidden = recovering || signingUp;
+        $("#switchBtn").hidden = recovering;
+        $("#switchBtn").textContent = signingUp ? "Já tenho conta" : "Criar conta";
         $("#authErr").textContent = "";
       }
+      $("#switchBtn").onclick = () => showAuth(signingUp ? "login" : "signup");
       async function showApp(session) {
         $("#authView").hidden = true; $("#appView").hidden = false;
         $("#who").textContent = session.user.email || "";
@@ -1011,6 +1017,15 @@
         }
         const email = $("#aEmail").value.trim();
         if (!email || !pass) return err.textContent = "Preencha e-mail e senha.";
+        if (signingUp) {
+          if (pass.length < 6) return err.textContent = "A senha precisa ter pelo menos 6 caracteres.";
+          btn.disabled = true; btn.textContent = "Criando…";
+          const { data, error } = await sb.auth.signUp({ email, password: pass, options: { emailRedirectTo: location.origin + location.pathname } });
+          btn.disabled = false; btn.textContent = "Criar conta";
+          if (error) return err.textContent = /registered|exists/i.test(error.message) ? "Esse e-mail já tem conta. Clique em \"Já tenho conta\"." : /signups? not allowed|disabled/i.test(error.message) ? "Novos cadastros estão desativados." : "Não consegui criar a conta: " + error.message;
+          if (!data.session) { showAuth("login"); $("#aEmail").value = email; $("#authErr").textContent = ""; toast("Conta criada! Confirme pelo link que enviamos no seu e-mail."); }
+          return;
+        }
         btn.disabled = true; btn.textContent = "Entrando…";
         const { error } = await sb.auth.signInWithPassword({ email, password: pass });
         btn.disabled = false; btn.textContent = "Entrar";
