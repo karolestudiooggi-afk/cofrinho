@@ -613,6 +613,67 @@
       color: var(--cobalt)
     }
 
+    .auth {
+      min-height: calc(100vh - 40px);
+      display: grid;
+      place-items: center;
+      padding: 20px
+    }
+
+    .auth-card {
+      background: var(--card);
+      border: 1.5px solid var(--line);
+      border-radius: 28px;
+      padding: 30px 26px;
+      width: min(420px, 100%)
+    }
+
+    .auth-card h1 {
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: 2.2rem;
+      line-height: 1.05;
+      margin: 0 0 6px
+    }
+
+    .auth-card p.lead {
+      color: var(--soft);
+      margin: 0 0 22px
+    }
+
+    .auth-card .btn {
+      width: 100%;
+      margin-top: 6px
+    }
+
+    .auth-links {
+      display: flex;
+      justify-content: center;
+      margin-top: 14px
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center
+    }
+
+    .who {
+      color: var(--soft);
+      font-size: .88rem;
+      margin-right: 4px;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    .loading {
+      text-align: center;
+      color: var(--soft);
+      padding: 60px 0
+    }
+
     .status {
       position: fixed;
       left: 50%;
@@ -764,10 +825,27 @@
 </head>
 
 <body>
-  <div class="wrap">
+  <section class="auth" id="authView" hidden>
+    <form class="auth-card" id="authForm" novalidate>
+      <div style="font-size:2.6rem">🫙</div>
+      <h1 id="authTitle">Meu cofrinho</h1>
+      <p class="lead" id="authLead">Entre para ver suas metas.</p>
+      <div class="field" id="emailField"><label for="aEmail">E-mail</label><input id="aEmail" type="email"
+          autocomplete="email" required></div>
+      <div class="field"><label for="aPass" id="aPassLbl">Senha</label><input id="aPass" type="password"
+          autocomplete="current-password" minlength="6" required></div>
+      <p class="err" id="authErr"></p>
+      <button type="submit" class="btn" id="authBtn">Entrar</button>
+      <div class="auth-links"><button type="button" class="linkish blue" id="forgotBtn">Esqueci minha senha</button>
+      </div>
+    </form>
+  </section>
+  <div class="wrap" id="appView" hidden>
     <header class="top">
       <h1 class="hello" id="hello">Meu cofrinho<small id="helloSub">Cada moeda conta. Crie uma meta e comece a encher o
           pote.</small></h1>
+      <div class="top-actions"><span class="who" id="who"></span><button class="btn ghost small"
+          id="logoutBtn">Sair</button></div>
       <div class="sum" id="sum" hidden>
         <div><b id="sTotal">R$ 0</b><span>guardado no total</span></div>
         <div><b id="sGoals">0</b><span id="sGoalsLbl">metas</span></div>
@@ -775,8 +853,10 @@
       </div>
     </header>
 
-    <main id="main"></main>
-    <p class="sync" id="sync">Carregando…</p>
+    <main id="main">
+      <p class="loading">Abrindo seus potes…</p>
+    </main>
+    <p class="sync" id="sync">🔒 Suas metas ficam salvas na nuvem, protegidas pela sua senha. Só você tem acesso.</p>
     <div class="backup"><button class="btn ghost small" id="bkExport">Baixar backup</button><button
         class="btn ghost small" id="bkImport">Restaurar backup</button><input type="file" id="bkFile"
         accept="application/json,.json" hidden></div>
@@ -816,6 +896,7 @@
 
   <div class="status" id="status" role="status" aria-live="polite"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script>
     (() => {
       const EMOJIS = ["💰", "🛒", "🛍️", "👗", "👟", "💄", "✈️", "🏖️", "🏠", "🛋️", "🔧", "🚗", "🏍️", "🚲", "⛽", "🛟", "🏥", "💊", "🎓", "📚", "💻", "📱", "🎮", "🎧", "📷", "💍", "🎂", "🎄", "🎁", "🎉", "👶", "🐶", "🐱", "🏋️", "⚽", "🎸", "🍔", "🍕", "☕", "💳", "🧾", "📈", "🌱", "✂️", "💅", "⭐"];
@@ -824,7 +905,6 @@
       const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
       const brl0 = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
       const $ = s => document.querySelector(s);
-      const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
       const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
       const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
       const parseMoney = v => { if (!v) return NaN; let s = String(v).replace(/[R$\s]/g, ""); if (s.includes(",")) s = s.replace(/\./g, "").replace(",", "."); return Math.round(parseFloat(s) * 100) / 100; };
@@ -832,20 +912,118 @@
 
       let state = { goals: [] };
       const LS = "cofrinho-v1";
+      const SB_URL = "https://vgxzybcobxixqshthrwa.supabase.co";
+      const SB_KEY = "sb_publishable_D-EimSoUEVyrTyqAKTbbIQ_rZBSId-W";
+      const sb = window.supabase.createClient(SB_URL, SB_KEY, { db: { schema: "cofrinho" } });
+      const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
+      const FAIL = "Não consegui salvar. Confira sua internet e tente de novo.";
 
-      // ---------- armazenamento ----------
-      try { const raw = localStorage.getItem(LS); if (raw) state = JSON.parse(raw) || state; } catch (e) { }
-      if (!Array.isArray(state.goals)) state.goals = [];
+      // ---------- banco de dados ----------
+      const rowToGoal = r => ({ id: r.id, name: r.name, emoji: r.emoji, color: r.color, target: Number(r.target), deadline: r.deadline, createdAt: r.created_at, entries: [] });
+      const rowToEntry = r => ({ id: r.id, amount: Number(r.amount), type: r.type, date: r.date, source: r.source, note: r.note || "", ts: Date.parse(r.created_at) || 0 });
 
-      let saveTimer;
-      function save() {
-        try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) { }
+      async function loadAll() {
+        const [g, e] = await Promise.all([
+          sb.from("goals").select("*").order("created_at"),
+          sb.from("entries").select("*").order("created_at")
+        ]);
+        if (g.error || e.error) throw (g.error || e.error);
+        const goals = g.data.map(rowToGoal);
+        const byId = Object.fromEntries(goals.map(x => [x.id, x]));
+        e.data.forEach(r => { if (byId[r.goal_id]) byId[r.goal_id].entries.push(rowToEntry(r)); });
+        state = { goals };
       }
-      function setSync() {
-        $("#sync").textContent = "🔒 Seus dados ficam só neste navegador e nunca são enviados para nenhum servidor. Faça backup de vez em quando.";
+      const db = {
+        async addGoal(g) { const { error } = await sb.from("goals").insert({ id: g.id, name: g.name, emoji: g.emoji, color: g.color, target: g.target, deadline: g.deadline }); if (error) throw error; },
+        async updateGoal(id, f) { const { error } = await sb.from("goals").update(f).eq("id", id); if (error) throw error; },
+        async deleteGoal(id) { const { error } = await sb.from("goals").delete().eq("id", id); if (error) throw error; },
+        async addEntry(goalId, e) { const { error } = await sb.from("entries").insert({ id: e.id, goal_id: goalId, amount: e.amount, type: e.type, date: e.date, source: e.source, note: e.note || null }); if (error) throw error; },
+        async deleteEntry(id) { const { error } = await sb.from("entries").delete().eq("id", id); if (error) throw error; }
+      };
+
+      // envia metas (de backup ou do aparelho) para o banco, com ids novos
+      async function uploadGoals(goals) {
+        const gRows = [], eRows = [];
+        for (const g of goals) {
+          const gid = newId();
+          gRows.push({ id: gid, name: String(g.name || "Meta").slice(0, 60), emoji: g.emoji || "💰", color: /^#[0-9A-Fa-f]{6}$/.test(g.color) ? g.color : "#2F4BD8", target: Number(g.target) || 1, deadline: g.deadline || null });
+          for (const e of (g.entries || [])) {
+            if (!(Number(e.amount) > 0)) continue;
+            eRows.push({ id: newId(), goal_id: gid, amount: Number(e.amount), type: e.type === "out" ? "out" : "in", date: e.date || today(), source: String(e.source || "manual").slice(0, 30), note: e.note ? String(e.note).slice(0, 120) : null });
+          }
+        }
+        if (gRows.length) { const r = await sb.from("goals").insert(gRows); if (r.error) throw r.error; }
+        if (eRows.length) { const r = await sb.from("entries").insert(eRows); if (r.error) throw r.error; }
       }
 
-      function connect() { setSync(true); }
+      // ---------- login ----------
+      let recovering = false, currentUser = null;
+      function showAuth(mode) {
+        $("#appView").hidden = true; $("#authView").hidden = false;
+        recovering = mode === "recovery";
+        $("#authTitle").textContent = recovering ? "Nova senha" : "Meu cofrinho";
+        $("#authLead").textContent = recovering ? "Escolha uma senha nova para entrar." : "Entre para ver suas metas.";
+        $("#emailField").hidden = recovering;
+        $("#aPassLbl").textContent = recovering ? "Nova senha (mínimo 6 caracteres)" : "Senha";
+        $("#aPass").autocomplete = recovering ? "new-password" : "current-password";
+        $("#authBtn").textContent = recovering ? "Salvar nova senha" : "Entrar";
+        $("#forgotBtn").hidden = recovering;
+        $("#authErr").textContent = "";
+      }
+      async function showApp(session) {
+        $("#authView").hidden = true; $("#appView").hidden = false;
+        $("#who").textContent = session.user.email || "";
+        $("#main").innerHTML = '<p class="loading">Abrindo seus potes…</p>';
+        try {
+          await loadAll();
+          render();
+          await offerLocalImport();
+        } catch (e) {
+          $("#main").innerHTML = '<p class="loading">Não consegui carregar suas metas. Confira sua internet e recarregue a página.</p>';
+        }
+      }
+      async function offerLocalImport() {
+        let local = null;
+        try { local = JSON.parse(localStorage.getItem(LS) || "null"); } catch (e) { }
+        if (!local || !Array.isArray(local.goals) || !local.goals.length) return;
+        if (state.goals.length) return;
+        if (!confirm(`Encontrei ${local.goals.length} meta(s) salvas neste aparelho. Quer levar para a nuvem?`)) return;
+        try {
+          await uploadGoals(local.goals);
+          localStorage.removeItem(LS);
+          await loadAll(); render(); toast("Metas enviadas para a nuvem");
+        } catch (e) { toast(FAIL); }
+      }
+      $("#authForm").onsubmit = async ev => {
+        ev.preventDefault();
+        const btn = $("#authBtn"), err = $("#authErr");
+        const pass = $("#aPass").value;
+        err.textContent = "";
+        if (recovering) {
+          if (pass.length < 6) return err.textContent = "A senha precisa ter pelo menos 6 caracteres.";
+          btn.disabled = true;
+          const { error } = await sb.auth.updateUser({ password: pass });
+          btn.disabled = false;
+          if (error) return err.textContent = "Não consegui trocar a senha. Peça um link novo.";
+          recovering = false; toast("Senha alterada");
+          const { data } = await sb.auth.getSession(); if (data.session) { currentUser = data.session.user.id; showApp(data.session); }
+          return;
+        }
+        const email = $("#aEmail").value.trim();
+        if (!email || !pass) return err.textContent = "Preencha e-mail e senha.";
+        btn.disabled = true; btn.textContent = "Entrando…";
+        const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+        btn.disabled = false; btn.textContent = "Entrar";
+        if (error) err.textContent = /confirm/i.test(error.message) ? "Confirme seu e-mail antes de entrar." : "E-mail ou senha incorretos.";
+      };
+      $("#forgotBtn").onclick = async () => {
+        const email = $("#aEmail").value.trim();
+        if (!email) return $("#authErr").textContent = "Digite seu e-mail acima e clique de novo.";
+        const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+        $("#authErr").textContent = error ? "Não consegui enviar o link agora. Tente em alguns minutos." : "";
+        if (!error) toast("Enviamos um link para o seu e-mail");
+      };
+      $("#logoutBtn").onclick = async () => { await sb.auth.signOut(); state = { goals: [] }; };
 
       // ---------- backup ----------
       function exportBackup() {
@@ -859,13 +1037,13 @@
       }
       function importBackup(file) {
         const r = new FileReader();
-        r.onload = () => {
-          try {
-            const d = JSON.parse(r.result);
-            if (!d || !Array.isArray(d.goals)) throw 0;
-            if (state.goals.length && !confirm("Substituir suas metas atuais pelas do backup?")) return;
-            state = d; save(); render(); toast("Backup restaurado");
-          } catch (e) { toast("Esse arquivo não é um backup do Cofrinho"); }
+        r.onload = async () => {
+          let d;
+          try { d = JSON.parse(r.result); if (!d || !Array.isArray(d.goals)) throw 0; }
+          catch (e) { return toast("Esse arquivo não é um backup do Cofrinho"); }
+          if (!confirm(`Adicionar ${d.goals.length} meta(s) do backup às suas metas atuais?`)) return;
+          try { await uploadGoals(d.goals); await loadAll(); render(); toast("Backup restaurado"); }
+          catch (e) { toast(FAIL); }
         };
         r.readAsText(file);
       }
@@ -974,19 +1152,27 @@
         $("#goalDlg").showModal();
         setTimeout(() => $("#gName").focus(), 50);
       }
-      $("#goalForm").onsubmit = e => {
+      $("#goalForm").onsubmit = async e => {
         e.preventDefault();
         const name = $("#gName").value.trim(), target = parseMoney($("#gTarget").value), deadline = $("#gDate").value || null;
         if (!name) return $("#goalErr").textContent = "Dê um nome para a meta.";
         if (!(target > 0)) return $("#goalErr").textContent = "Informe um valor maior que zero, como 1500 ou 1.500,00.";
-        if (editingId) {
-          Object.assign(state.goals.find(x => x.id === editingId), { name, target, deadline, emoji: pick.emoji, color: pick.color });
-          toast("Meta atualizada");
-        } else {
-          state.goals.push({ id: uid(), name, target, deadline, emoji: pick.emoji, color: pick.color, createdAt: today(), entries: [] });
-          toast("Meta criada. Agora é só encher o pote!");
-        }
-        save(); render(); $("#goalDlg").close();
+        const btn = $("#goalSave"); btn.disabled = true;
+        try {
+          if (editingId) {
+            const f = { name, target, deadline, emoji: pick.emoji, color: pick.color };
+            await db.updateGoal(editingId, f);
+            Object.assign(state.goals.find(x => x.id === editingId), f);
+            toast("Meta atualizada");
+          } else {
+            const g = { id: newId(), name, target, deadline, emoji: pick.emoji, color: pick.color, createdAt: today(), entries: [] };
+            await db.addGoal(g);
+            state.goals.push(g);
+            toast("Meta criada. Agora é só encher o pote!");
+          }
+        } catch (err) { btn.disabled = false; return $("#goalErr").textContent = FAIL; }
+        btn.disabled = false;
+        render(); $("#goalDlg").close();
         if (editingId) openDetail(editingId);
       };
 
@@ -1045,26 +1231,31 @@
           const cur = parseMoney($("#eAmt").value) || 0;
           $("#eAmt").value = String(cur + Number(b.dataset.q)).replace(".", ",");
         });
-        d.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+        d.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
           if (!confirm("Apagar este registro?")) return;
+          try { await db.deleteEntry(b.dataset.del); } catch (e) { return toast(FAIL); }
           g.entries = g.entries.filter(e => e.id !== b.dataset.del);
-          save(); render(); openDetail(id); toast("Registro apagado");
+          render(); openDetail(id); toast("Registro apagado");
         });
         $("#editGoal").onclick = () => openGoal(id);
-        $("#delGoal").onclick = () => {
+        $("#delGoal").onclick = async () => {
           if (!confirm(`Apagar a meta "${g.name}" e todo o histórico dela? Isso não pode ser desfeito.`)) return;
+          try { await db.deleteGoal(id); } catch (e) { return toast(FAIL); }
           state.goals = state.goals.filter(x => x.id !== id);
-          save(); render(); $("#detailDlg").close(); toast("Meta apagada");
+          render(); $("#detailDlg").close(); toast("Meta apagada");
         };
-        $("#entryForm").onsubmit = ev => {
+        $("#entryForm").onsubmit = async ev => {
           ev.preventDefault();
           const amount = parseMoney($("#eAmt").value);
           if (!(amount > 0)) return $("#eErr").textContent = "Digite um valor maior que zero.";
           const date = $("#eDate").value || today();
           if (mode === "out" && amount > saved(g) + 0.001) return $("#eErr").textContent = `Você só tem ${brl.format(saved(g))} nesse pote.`;
           const before = pct(g);
-          g.entries.push({ id: uid(), ts: Date.now(), amount, date, type: mode, source: $("#eSrc").value, note: $("#eNote").value.trim() });
-          save(); render();
+          const entry = { id: newId(), ts: Date.now(), amount, date, type: mode, source: $("#eSrc").value, note: $("#eNote").value.trim() };
+          const sbtn = $("#eSave"); sbtn.disabled = true;
+          try { await db.addEntry(g.id, entry); } catch (e) { sbtn.disabled = false; return $("#eErr").textContent = FAIL; }
+          g.entries.push(entry);
+          render();
           if (!$("#detailDlg").open) $("#detailDlg").showModal();
           const jarEl = $("#dJar");
           if (mode === "in") dropCoin(jarEl);
@@ -1095,8 +1286,16 @@
       document.addEventListener("click", e => { const b = e.target.closest("#goalDlg [data-close]"); if (b) $("#goalDlg").close(); });
       ["goalDlg", "detailDlg"].forEach(id => $("#" + id).addEventListener("click", e => { if (e.target.id === id) e.target.close(); }));
 
-      render();
-      connect();
+      sb.auth.onAuthStateChange((event, session) => {
+        if (event === "PASSWORD_RECOVERY") return showAuth("recovery");
+        if (recovering) return;
+        if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+          if (!session) { currentUser = null; return showAuth(); }
+          if (session.user.id === currentUser) return;
+          currentUser = session.user.id; showApp(session);
+        }
+        if (event === "SIGNED_OUT") { currentUser = null; showAuth(); }
+      });
     })();
   </script>
 </body>
